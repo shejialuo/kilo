@@ -1,9 +1,16 @@
+#include <stdlib.h>
 #include <termio.h>
 #include <unistd.h>
 
+struct termios originalTermios;
+
+void disableRawMode() {
+  tcsetattr(STDIN_FILENO, TCSAFLUSH, &originalTermios);
+}
+
 void enableRawMode() {
-  struct termios raw;
-  tcgetattr(STDIN_FILENO, &raw);
+  tcgetattr(STDIN_FILENO, &originalTermios);
+  struct termios raw = originalTermios;
   /*
     The `ECHO` feature causes each key you type to be
     printed to the terminal, so you can see what you're
@@ -17,6 +24,8 @@ void enableRawMode() {
   */
   raw.c_lflag &= ~(ECHO);
   tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+
+  atexit(disableRawMode);
 }
 
 int main() {
