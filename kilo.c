@@ -1,3 +1,5 @@
+#include <ctype.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <termio.h>
 #include <unistd.h>
@@ -46,6 +48,29 @@ int main() {
 
     What we want is raw mode.
   */
-  while(read(STDIN_FILENO, &c, 1) == 1 && c!= 'q');
+  while(read(STDIN_FILENO, &c, 1) == 1 && c!= 'q') {
+    /*
+      This is a very useful snippet. It shows us how various
+      keypresses translate into the bytes we read.
+
+      You'll notice a few interesting things:
+      + Arrow keys, `Page Up`, `Page Down`, `Home` and `End`
+        all input 3 or 4 bytes to the terminal: `27`, `'['`,
+        and then one or two other characters. This is known
+        as an *escape sequence* All secape sequences start
+        with a `27` byte. Pressing `Escape` sends a single
+        `27` byte as input.
+      + `Backspace` is byte `127`. `Delete` is a 4-byte
+        escape sequence.
+      + `Enter` is byte `10`, which is a newline character
+      + The `ctrl` key combinations that do work seem to
+        map the letters A-Z to the codes 1-26. 
+    */
+    if(iscntrl(c)) {
+      printf("%d\n", c);
+    } else {
+      printf("%d ('%c')\n", c, c);
+    }
+  }
   return 0;
 }
