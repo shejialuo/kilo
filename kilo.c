@@ -21,8 +21,12 @@ void enableRawMode() {
     You may be familiar with this mode if you've ever had to
     type a password at the terminal, when using `sudo`
     for example
+
+    There is an `ICANON` flag that allows us to turn off
+    canonical mode. This means we will finally by reading
+    input *byte-byte*, instead of line-by-line.
   */
-  raw.c_lflag &= ~(ECHO);
+  raw.c_lflag &= ~(ECHO | ICANON);
   tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
 
   atexit(disableRawMode);
