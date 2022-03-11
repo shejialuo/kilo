@@ -50,6 +50,20 @@ void enableRawMode() {
   raw.c_oflag &= ~(OPOST);
   raw.c_cflag |= (CS8);
   raw.c_lflag &= ~(ECHO | ICANON | IEXTEN |ISIG);
+
+  /*
+    The `VMIN` value sets the minimum number of bytes
+    of input needed before `read()` can return.
+
+    The `VTIME` value sets the maximum amount of time
+    to wait before `read()` returns. It is in tenths of
+    a second
+
+    So we can simulate the animatation.
+  */
+  raw.c_cc[VMIN] = 0;
+  raw.c_cc[VTIME] = 1;
+
   tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
 
   atexit(disableRawMode);
@@ -59,7 +73,6 @@ int main() {
 
   enableRawMode();
 
-  char c;
   /*
     Now, the terminal starts in canonical mode, in this
     mode, keyboard input is only sent to your program
@@ -69,7 +82,7 @@ int main() {
 
     What we want is raw mode.
   */
-  while(read(STDIN_FILENO, &c, 1) == 1 && c!= 'q') {
+  while(1) {
     /*
       This is a very useful snippet. It shows us how various
       keypresses translate into the bytes we read.
@@ -87,11 +100,14 @@ int main() {
       + The `ctrl` key combinations that do work seem to
         map the letters A-Z to the codes 1-26. 
     */
+    char c = '\0';
+    read(STDIN_FILENO, &c, 1);
     if(iscntrl(c)) {
       printf("%d\r\n", c);
     } else {
       printf("%d ('%c')\r\n", c, c);
     }
+    if (c == 'q') break;
   }
   return 0;
 }
