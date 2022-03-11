@@ -10,6 +10,10 @@
 struct termios originalTermios;
 
 void die(const char* s) {
+
+  write(STDOUT_FILENO, "\x1b[2J",4);
+  write(STDOUT_FILENO, "\x1b[H",3);
+
   perror(s);
   exit(1);
 }
@@ -78,6 +82,39 @@ void enableRawMode() {
   atexit(disableRawMode);
 }
 
+char editorReadKey() {
+  int nread;
+  char c;
+  while((nread = read(STDIN_FILENO, &c, 1)) != 1) {
+    if(nread == -1 && errno != EAGAIN) die("read");
+  }
+  return c;
+}
+
+void editorRefreshScreen() {
+  /*
+    \x1b is the escape character, or 27 in decimal
+    We are writing an *escape sequence* to the terminal.
+    Escape sequences always start with an escape character
+    followed by a `[` character.
+  */
+  write(STDOUT_FILENO, "\x1b[2J",4);
+  // Move cursor position
+  write(STDOUT_FILENO, "\x1b[H",3);
+}
+
+void editorProcessKeypress() {
+  char c = editorReadKey();
+
+  switch(c) {
+    case CTRL_KEY('q'):
+      write(STDOUT_FILENO, "\x1b[2J",4);
+      write(STDOUT_FILENO, "\x1b[H",3);
+      exit(0);
+      break;
+  }
+}
+
 int main() {
 
   enableRawMode();
@@ -109,14 +146,8 @@ int main() {
       + The `ctrl` key combinations that do work seem to
         map the letters A-Z to the codes 1-26. 
     */
-    char c = '\0';
-    if(read(STDIN_FILENO, &c, 1) == -1 && errno != EAGAIN) die("read");
-    if(iscntrl(c)) {
-      printf("%d\r\n", c);
-    } else {
-      printf("%d ('%c')\r\n", c, c);
-    }
-    if (c == CTRL_KEY('q')) break;
+    editorRefreshScreen();
+    editorProcessKeypress();
   }
   return 0;
 }
