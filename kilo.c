@@ -1,4 +1,5 @@
 #include <ctype.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <termio.h>
@@ -6,12 +7,18 @@
 
 struct termios originalTermios;
 
+void die(const char* s) {
+  perror(s);
+  exit(1);
+}
+
 void disableRawMode() {
-  tcsetattr(STDIN_FILENO, TCSAFLUSH, &originalTermios);
+  if(tcsetattr(STDIN_FILENO, TCSAFLUSH, &originalTermios) == -1)
+    die("tcsetattr");
 }
 
 void enableRawMode() {
-  tcgetattr(STDIN_FILENO, &originalTermios);
+  if(tcgetattr(STDIN_FILENO, &originalTermios) == -1) die("tcgetattr");
   struct termios raw = originalTermios;
   /*
     The `ECHO` feature causes each key you type to be
@@ -64,7 +71,7 @@ void enableRawMode() {
   raw.c_cc[VMIN] = 0;
   raw.c_cc[VTIME] = 1;
 
-  tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+  if(tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1) die("tcsetattr");
 
   atexit(disableRawMode);
 }
@@ -101,7 +108,7 @@ int main() {
         map the letters A-Z to the codes 1-26. 
     */
     char c = '\0';
-    read(STDIN_FILENO, &c, 1);
+    if(read(STDIN_FILENO, &c, 1) == -1 && errno != EAGAIN) die("read");
     if(iscntrl(c)) {
       printf("%d\r\n", c);
     } else {
