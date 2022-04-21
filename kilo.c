@@ -2,12 +2,15 @@
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/ioctl.h>
 #include <termio.h>
 #include <unistd.h>
 
 #define CTRL_KEY(k) ((k) & 0x1f)
 
 struct editorConfig {
+  int screenRows;
+  int screenCols;
   struct termios originalTermios;
 };
 
@@ -109,12 +112,86 @@ char editorReadKey() {
 }
 
 /*
+  * Get the cursor postion
+*/
+int getCursorPosition(int* rows, int* cols) {
+  char buf[32];
+  unsigned int i = 0;
+
+  /*
+    * Use `n` command to query the terminal
+    * for status information. We want to give
+    * it an argument to ask for position
+  */
+  if(write(STDOUT_FILENO, "\x1b[6n", 4) != 4)
+    return -1;
+
+  while(i < sizeof(buf) - 1) {
+    if(read(STDIN_FILENO, &buf[i], 1) != 1) break;
+    if(buf[i] == 'R') break;
+    i++;
+  }
+  buf[i] = '\0';
+
+  if(buf[0] != '\x1b' || buf[1] != '[') return -1;
+  if(sscanf(&buf[2], "%d;%d", rows, cols) != 2) return -1;
+
+  return 0;
+}
+
+
+/*
+  * Use `ioctl` to get terminal window size. However,
+  * `ioctl` isn't guaranteed to be able to request
+  * the winodw size on all systems, so we are going
+  * to provide a fallback method of getting the
+  * window size
+
+  * The strategy is to position the cursor at the
+  * bottom-right of the screen, then use escape
+  * sequences that let us query the position of
+  * the cursor. That tells us how many rows and
+  * columns there must be on the screen
+*/
+int getWindowSize(int* rows, int* cols) {
+  struct winsize ws;
+
+  if(ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0) {
+    // Move the cursor to the bottom-right
+    /*
+      * We are sending two secape sequences one after the other.
+      * The `C` command moves the cursor to the right
+      * The `B` command moves the cursor down.
+      * The argument says how much to much to move it
+      * right or down by, we use a so much large value `999`
+    */
+    if(write(STDOUT_FILENO, "\x1b[999C\x1b[999B", 12) != 12) {
+      return -1;
+    }
+    return getCursorPosition(rows, cols);
+  } else {
+    *cols = ws.ws_col;
+    *rows = ws.ws_row;
+    return 0;
+  }
+  return -1;
+}
+
+/*
   * Handle drawing each row of the buffer of text
   * being edited
 */
 void editorDrawRows() {
-  for(int y = 0; y < 24; ++y) {
-    write(STDOUT_FILENO, "~\r\n", 3);
+  for(int y = 0; y < E.screenRows; ++y) {
+    write(STDOUT_FILENO, "~", 1);
+    /*
+      * We shouldn't write `\r\n` to the last line
+      * because this causes terminal to scroll in
+      * order to make room for a new, blank line.
+    */
+    if(y < E.screenRows - 1) {
+      write(STDOUT_FILENO, "\r\n", 2);
+    }
   }
 }
 
@@ -155,10 +232,15 @@ void editorProcessKeypress() {
   }
 }
 
+void initEditor() {
+  if(getWindowSize(&E.screenRows, &E.screenCols) == -1)
+    die("getWindowSize");
+}
+
 int main() {
 
   enableRawMode();
-
+  initEditor();
   /*
     Now, the terminal starts in canonical mode, in this
     mode, keyboard input is only sent to your program
