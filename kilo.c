@@ -7,8 +7,15 @@
 
 #define CTRL_KEY(k) ((k) & 0x1f)
 
-struct termios originalTermios;
+struct editorConfig {
+  struct termios originalTermios;
+};
 
+struct editorConfig E;
+
+/*
+  * To deal with error
+*/
 void die(const char* s) {
 
   write(STDOUT_FILENO, "\x1b[2J",4);
@@ -18,14 +25,21 @@ void die(const char* s) {
   exit(1);
 }
 
+/*
+  * To disable row mode when exiting
+*/
 void disableRawMode() {
-  if(tcsetattr(STDIN_FILENO, TCSAFLUSH, &originalTermios) == -1)
+  if(tcsetattr(STDIN_FILENO, TCSAFLUSH, &E.originalTermios) == -1)
     die("tcsetattr");
 }
 
+/*
+  * To turn off some flags of the terminal attributes
+  * to enable raw mode
+*/
 void enableRawMode() {
-  if(tcgetattr(STDIN_FILENO, &originalTermios) == -1) die("tcgetattr");
-  struct termios raw = originalTermios;
+  if(tcgetattr(STDIN_FILENO, &E.originalTermios) == -1) die("tcgetattr");
+  struct termios raw = E.originalTermios;
   /*
     The `ECHO` feature causes each key you type to be
     printed to the terminal, so you can see what you're
@@ -58,7 +72,7 @@ void enableRawMode() {
 
     We will turn off all ouput processing features by
     turning off the `OPOST` flag.
-  
+
   */
   raw.c_oflag &= ~(OPOST);
   raw.c_cflag |= (CS8);
@@ -82,6 +96,9 @@ void enableRawMode() {
   atexit(disableRawMode);
 }
 
+/*
+  * To deal with the input key
+*/
 char editorReadKey() {
   int nread;
   char c;
@@ -91,6 +108,19 @@ char editorReadKey() {
   return c;
 }
 
+/*
+  * Handle drawing each row of the buffer of text
+  * being edited
+*/
+void editorDrawRows() {
+  for(int y = 0; y < 24; ++y) {
+    write(STDOUT_FILENO, "~\r\n", 3);
+  }
+}
+
+/*
+  * To initialize the screen
+*/
 void editorRefreshScreen() {
   /*
     \x1b is the escape character, or 27 in decimal
@@ -101,8 +131,18 @@ void editorRefreshScreen() {
   write(STDOUT_FILENO, "\x1b[2J",4);
   // Move cursor position
   write(STDOUT_FILENO, "\x1b[H",3);
+
+  editorDrawRows();
+
+  /*
+    Use <esc>[H escape sequence to reposition
+  */
+  write(STDOUT_FILENO, "\x1b[H", 3);
 }
 
+/*
+  * To process the input key
+*/
 void editorProcessKeypress() {
   char c = editorReadKey();
 
@@ -144,7 +184,7 @@ int main() {
         escape sequence.
       + `Enter` is byte `10`, which is a newline character
       + The `ctrl` key combinations that do work seem to
-        map the letters A-Z to the codes 1-26. 
+        map the letters A-Z to the codes 1-26.
     */
     editorRefreshScreen();
     editorProcessKeypress();
