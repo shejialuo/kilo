@@ -7,6 +7,8 @@
 #include <termio.h>
 #include <unistd.h>
 
+#define KILO_VERSION "0.0.1"
+
 #define CTRL_KEY(k) ((k) & 0x1f)
 
 struct editorConfig {
@@ -210,12 +212,35 @@ void bufferFree(struct appendBuf* buf) {
 */
 void editorDrawRows(struct appendBuf* buf) {
   for(int y = 0; y < E.screenRows; ++y) {
-    bufferAppend(buf, "~", 1);
+    if(y == E.screenRows / 3) {
+      char welcome[80];
+      int welcomeLength = snprintf(welcome, sizeof(welcome),
+          "Kilo editor -- version %s", KILO_VERSION);
+      if(welcomeLength > E.screenCols)
+        welcomeLength = E.screenCols;
+      int padding = (E.screenCols - welcomeLength) / 2;
+      if(padding) {
+        bufferAppend(buf, "~", 1);
+        padding--;
+      }
+      while(padding--)
+        bufferAppend(buf, " ", 1);
+      bufferAppend(buf, welcome, welcomeLength);
+    } else {
+      bufferAppend(buf, "~", 1);
+    }
     /*
       * We shouldn't write `\r\n` to the last line
       * because this causes terminal to scroll in
       * order to make room for a new, blank line.
     */
+
+    /*
+     * We should clear lines at one time instead of
+     * the entire screen
+    */
+    bufferAppend(buf, "\x1b[K", 3);
+
     if(y < E.screenRows - 1) {
       bufferAppend(buf, "\r\n", 2);
     }
@@ -228,12 +253,20 @@ void editorDrawRows(struct appendBuf* buf) {
 void editorRefreshScreen() {
   struct appendBuf buf = ABUF_INIT;
   /*
+   * We use escape sequences to tell the terminal
+   * to hide and show the cursor. The `h` and `l`
+   * commands are used to turn on and turn off
+   * various terminal features or "modes".
+  */
+  bufferAppend(&buf, "\x1b[?25l", 6);
+
+  /*
     \x1b is the escape character, or 27 in decimal
     We are writing an *escape sequence* to the terminal.
     Escape sequences always start with an escape character
     followed by a `[` character.
   */
-  bufferAppend(&buf, "\x1b[2J", 4);
+
   // Move cursor position
   bufferAppend(&buf, "\x1b[H",3);
 
@@ -243,6 +276,7 @@ void editorRefreshScreen() {
     Use <esc>[H escape sequence to reposition
   */
   bufferAppend(&buf, "\x1b[H", 3);
+  bufferAppend(&buf, "\x1b[?25h", 6);
 
   write(STDOUT_FILENO, buf.buf, buf.length);
   bufferFree(&buf);
