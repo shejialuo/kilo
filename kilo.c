@@ -2,6 +2,7 @@
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/ioctl.h>
 #include <termio.h>
 #include <unistd.h>
@@ -177,20 +178,46 @@ int getWindowSize(int* rows, int* cols) {
   return -1;
 }
 
+struct appendBuf {
+  char* buf;
+  int length;
+};
+
+#define ABUF_INIT {NULL, 0}
+
+/*
+ * Use `realloc` to request much more memory
+*/
+void bufferAppend(struct appendBuf* buf, const char* s, int length) {
+  char* new = realloc(buf->buf, buf->length + length);
+
+  if(new == NULL) return;
+  memcpy(&new[buf->length], s, length);
+  buf->buf = new;
+  buf->length += length;
+}
+
+/*
+ * Free the memory
+*/
+void bufferFree(struct appendBuf* buf) {
+  free(buf->buf);
+}
+
 /*
   * Handle drawing each row of the buffer of text
   * being edited
 */
-void editorDrawRows() {
+void editorDrawRows(struct appendBuf* buf) {
   for(int y = 0; y < E.screenRows; ++y) {
-    write(STDOUT_FILENO, "~", 1);
+    bufferAppend(buf, "~", 1);
     /*
       * We shouldn't write `\r\n` to the last line
       * because this causes terminal to scroll in
       * order to make room for a new, blank line.
     */
     if(y < E.screenRows - 1) {
-      write(STDOUT_FILENO, "\r\n", 2);
+      bufferAppend(buf, "\r\n", 2);
     }
   }
 }
@@ -199,22 +226,26 @@ void editorDrawRows() {
   * To initialize the screen
 */
 void editorRefreshScreen() {
+  struct appendBuf buf = ABUF_INIT;
   /*
     \x1b is the escape character, or 27 in decimal
     We are writing an *escape sequence* to the terminal.
     Escape sequences always start with an escape character
     followed by a `[` character.
   */
-  write(STDOUT_FILENO, "\x1b[2J",4);
+  bufferAppend(&buf, "\x1b[2J", 4);
   // Move cursor position
-  write(STDOUT_FILENO, "\x1b[H",3);
+  bufferAppend(&buf, "\x1b[H",3);
 
-  editorDrawRows();
+  editorDrawRows(&buf);
 
   /*
     Use <esc>[H escape sequence to reposition
   */
-  write(STDOUT_FILENO, "\x1b[H", 3);
+  bufferAppend(&buf, "\x1b[H", 3);
+
+  write(STDOUT_FILENO, buf.buf, buf.length);
+  bufferFree(&buf);
 }
 
 /*
