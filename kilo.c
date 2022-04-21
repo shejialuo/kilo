@@ -12,6 +12,8 @@
 #define CTRL_KEY(k) ((k) & 0x1f)
 
 struct editorConfig {
+  int cx;
+  int cy;
   int screenRows;
   int screenCols;
   struct termios originalTermios;
@@ -272,14 +274,38 @@ void editorRefreshScreen() {
 
   editorDrawRows(&buf);
 
+  char buffer[32];
+  snprintf(buffer, sizeof(buffer), "\x1b[%d;%dH", E.cy + 1, E.cx + 1);
+  bufferAppend(&buf, buffer, strlen(buffer));
+
   /*
     Use <esc>[H escape sequence to reposition
   */
-  bufferAppend(&buf, "\x1b[H", 3);
+  // bufferAppend(&buf, "\x1b[H", 3);
   bufferAppend(&buf, "\x1b[?25h", 6);
 
   write(STDOUT_FILENO, buf.buf, buf.length);
   bufferFree(&buf);
+}
+
+/*
+ * To process the w s a d
+*/
+void editorMoveCursor(char key) {
+  switch (key) {
+    case 'a':
+      E.cx--;
+      break;
+    case 'd':
+      E.cx++;
+      break;
+    case 'w':
+      E.cy--;
+      break;
+    case 's':
+      E.cy++;
+      break;
+  }
 }
 
 /*
@@ -293,6 +319,12 @@ void editorProcessKeypress() {
       write(STDOUT_FILENO, "\x1b[2J",4);
       write(STDOUT_FILENO, "\x1b[H",3);
       exit(0);
+      break;
+    case 'w':
+    case 's':
+    case 'a':
+    case 'd':
+      editorMoveCursor(c);
       break;
   }
 }
