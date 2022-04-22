@@ -2,8 +2,11 @@
 #define _BSD_SOURCE
 #define _GNU_SOURCE
 
+void editorSetStatusMessage(const char* fmt, ...);
+
 #include <ctype.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdlib.h>
@@ -20,6 +23,7 @@
 #define CTRL_KEY(k) ((k) & 0x1f)
 
 enum editorKey {
+  BACKSPACE = 127,
   ARROW_LEFT = 1000,
   ARROW_RIGHT,
   ARROW_UP,
@@ -343,6 +347,28 @@ void editorInsertChar(int c) {
 }
 
 /*
+  * Convert the array of `erow` structs into a single
+  * string that is ready to be written out to a file
+*/
+char *editorRowsToString(int* bufLength) {
+  int totalLength = 0;
+  for(int i = 0; i < E.numRows; ++i) {
+    totalLength += E.row[i].size + 1;
+  }
+  *bufLength = totalLength;
+
+  char *buf = malloc(totalLength);
+  char *p = buf;
+  for(int i = 0; i < E.numRows; ++i) {
+    memcpy(p, E.row[i].chars, E.row[i].size);
+    p += E.row[i].size;
+    *p = '\n';
+    p++;
+  }
+  return buf;
+}
+
+/*
   * Open the file and write the content to
   * `E.row.chars`.
 */
@@ -365,6 +391,28 @@ void editorOpen(char* filename) {
   }
   free(line);
   fclose(fp);
+}
+
+void editorSave() {
+  if(E.filename == NULL) return;
+  int length;
+
+  char *buf = editorRowsToString(&length);
+
+  int fd = open(E.filename, O_RDWR | O_CREAT, 0644);
+  if(fd != -1) {
+    if(ftruncate(fd, length) != -1) {
+      if(write(fd, buf, length) == length) {
+        close(fd);
+        free(buf);
+        editorSetStatusMessage("%d bytes written to disk", length);
+      }
+      return;
+    }
+    close(fd);
+  }
+  free(buf);
+  editorSetStatusMessage("Can't save! I/O error: %s", strerror(errno));
 }
 
 struct appendBuf {
@@ -615,10 +663,17 @@ void editorProcessKeypress() {
   int c = editorReadKey();
 
   switch(c) {
+    case '\r':
+      break;
+
     case CTRL_KEY('q'):
       write(STDOUT_FILENO, "\x1b[2J",4);
       write(STDOUT_FILENO, "\x1b[H",3);
       exit(0);
+      break;
+
+    case CTRL_KEY('s'):
+      editorSave();
       break;
 
     case HOME_KEY:
@@ -628,6 +683,11 @@ void editorProcessKeypress() {
     case END_KEY:
       if(E.cy < E.numRows)
         E.cx = E.row[E.cy].size;
+      break;
+
+    case BACKSPACE:
+    case CTRL_KEY('h'):
+    case DEL_KEY:
       break;
 
     case PAGE_UP:
@@ -651,6 +711,10 @@ void editorProcessKeypress() {
     case ARROW_LEFT:
     case ARROW_RIGHT:
       editorMoveCursor(c);
+      break;
+
+    case CTRL_KEY('l'):
+    case '\x1b':
       break;
 
     default:
@@ -685,7 +749,7 @@ int main(int argc, char* argv[]) {
     editorOpen(argv[1]);
   }
 
-  editorSetStatusMessage("HELP: Ctrl-Q = quit");
+  editorSetStatusMessage("HELP: Ctrl-S = save | Ctrl-Q = quit");
 
   /*
     Now, the terminal starts in canonical mode, in this
