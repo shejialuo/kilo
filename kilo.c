@@ -1,9 +1,14 @@
+#define _DEFAULT_SOURCE
+#define _BSD_SOURCE
+#define _GNU_SOURCE
+
 #include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/types.h>
 #include <termio.h>
 #include <unistd.h>
 
@@ -23,11 +28,18 @@ enum editorKey {
   PAGE_DOWN
 };
 
+typedef struct erow {
+  int size;
+  char* chars;
+}erow;
+
 struct editorConfig {
   int cx;
   int cy;
   int screenRows;
   int screenCols;
+  int numRows;
+  erow *row;
   struct termios originalTermios;
 };
 
@@ -237,6 +249,42 @@ int getWindowSize(int* rows, int* cols) {
   return -1;
 }
 
+/*
+  * To handle multiple lines
+*/
+void editorAppendRow(char* s, size_t length) {
+  E.row = realloc(E.row, sizeof(erow) * (E.numRows + 1));
+
+  int index = E.numRows;
+  E.row[index].size = length;
+  E.row[index].chars = malloc(length + 1);
+  memcpy(E.row[index].chars, s, length);
+  E.row[index].chars[length] = '\0';
+  E.numRows++;
+}
+
+/*
+  * Open the file and write the content to
+  * `E.row.chars`.
+*/
+void editorOpen(char* filename) {
+  FILE *fp = fopen(filename, "r");
+  if(!fp) die("fopen");
+
+  char* line = NULL;
+  size_t lineCap = 0;
+  ssize_t lineLength = -1;
+
+  while((lineLength = getline(&line, &lineCap, fp)) != -1) {
+    while(lineLength > 0 && (line[lineLength - 1]
+      == '\n' || line[lineLength - 1] == '\r'))
+      lineLength--;
+    editorAppendRow(line, lineLength);
+  }
+  free(line);
+  fclose(fp);
+}
+
 struct appendBuf {
   char* buf;
   int length;
@@ -269,23 +317,31 @@ void bufferFree(struct appendBuf* buf) {
 */
 void editorDrawRows(struct appendBuf* buf) {
   for(int y = 0; y < E.screenRows; ++y) {
-    if(y == E.screenRows / 3) {
-      char welcome[80];
-      int welcomeLength = snprintf(welcome, sizeof(welcome),
-          "Kilo editor -- version %s", KILO_VERSION);
-      if(welcomeLength > E.screenCols)
-        welcomeLength = E.screenCols;
-      int padding = (E.screenCols - welcomeLength) / 2;
-      if(padding) {
+    if(y >= E.numRows) {
+      if(E.numRows == 0 && y == E.screenRows / 3) {
+        char welcome[80];
+        int welcomeLength = snprintf(welcome, sizeof(welcome),
+            "Kilo editor -- version %s", KILO_VERSION);
+        if(welcomeLength > E.screenCols)
+          welcomeLength = E.screenCols;
+        int padding = (E.screenCols - welcomeLength) / 2;
+        if(padding) {
+          bufferAppend(buf, "~", 1);
+          padding--;
+        }
+        while(padding--)
+          bufferAppend(buf, " ", 1);
+        bufferAppend(buf, welcome, welcomeLength);
+      } else {
         bufferAppend(buf, "~", 1);
-        padding--;
       }
-      while(padding--)
-        bufferAppend(buf, " ", 1);
-      bufferAppend(buf, welcome, welcomeLength);
     } else {
-      bufferAppend(buf, "~", 1);
+      int length = E.row[y].size;
+      if (length > E.screenRows)
+        length = E.screenCols;
+      bufferAppend(buf, E.row[y].chars, length);
     }
+
     /*
       * We shouldn't write `\r\n` to the last line
       * because this causes terminal to scroll in
@@ -410,14 +466,23 @@ void editorProcessKeypress() {
 }
 
 void initEditor() {
+  E.cx = 0;
+  E.cy = 0;
+  E.numRows = 0;
+  E.row = NULL;
+
   if(getWindowSize(&E.screenRows, &E.screenCols) == -1)
     die("getWindowSize");
 }
 
-int main() {
+int main(int argc, char* argv[]) {
 
   enableRawMode();
   initEditor();
+  if(argc >= 2) {
+    editorOpen(argv[1]);
+  }
+
   /*
     Now, the terminal starts in canonical mode, in this
     mode, keyboard input is only sent to your program
