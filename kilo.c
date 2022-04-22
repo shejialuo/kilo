@@ -3,6 +3,8 @@
 #define _GNU_SOURCE
 
 void editorSetStatusMessage(const char* fmt, ...);
+void editorRefreshScreen();
+char* editorPrompt(char* prompt);
 
 #include <ctype.h>
 #include <errno.h>
@@ -477,7 +479,13 @@ void editorOpen(char* filename) {
 }
 
 void editorSave() {
-  if(E.filename == NULL) return;
+  if(E.filename == NULL) {
+    E.filename = editorPrompt("Save as: %s (ESC to cancel)");
+    if(E.filename == NULL) {
+      editorSetStatusMessage("Save aborted");
+      return;
+    }
+  }
   int length;
 
   char *buf = editorRowsToString(&length);
@@ -696,6 +704,44 @@ void editorSetStatusMessage(const char* fmt, ...) {
     sizeof(E.statusMessage), fmt, ap);
   va_end(ap);
   E.statusMessageTime = time(NULL);
+}
+
+/*
+ * Use prompt and return the value of the user input
+*/
+char* editorPrompt(char* prompt) {
+  size_t bufSize = 128;
+  char* buf = malloc(bufSize);
+
+  size_t bufLength = 0;
+  buf[0] = '\0';
+
+  while(1) {
+    editorSetStatusMessage(prompt, buf);
+    editorRefreshScreen();
+
+    int c= editorReadKey();
+    if(c == DEL_KEY || c == CTRL_KEY('h') || c == BACKSPACE) {
+      if(bufLength != 0)
+        buf[--bufLength] = '\0';
+    } else if(c == '\x1b') {
+      editorSetStatusMessage("");
+      free(buf);
+      return NULL;
+    } else if(c == '\r') {
+      if(bufLength != 0) {
+        editorSetStatusMessage("");
+        return buf;
+      }
+    } else if(!iscntrl(c) && c < 128) {
+      if(bufLength == bufSize - 1) {
+        bufSize *= 2;
+        buf = realloc(buf, bufSize);
+      }
+      buf[bufLength++] = c;
+      buf[bufLength] = '\0';
+    }
+  }
 }
 
 /*
