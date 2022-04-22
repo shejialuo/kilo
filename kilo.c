@@ -10,7 +10,7 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/types.h>
-#include <termio.h>
+#include <termios.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -322,6 +322,27 @@ void editorAppendRow(char* s, size_t length) {
 }
 
 /*
+  * Insert a single character into an `erow` at
+  * a given position
+*/
+void editorRowInsertChar(erow* row, int at, int c) {
+  if(at < 0 || at > row->size) at = row->size;
+  row->chars = realloc(row->chars, row->size + 2);
+  memmove(&row->chars[at + 1], &row->chars[at], row->size - at + 1);
+  row->size++;
+  row->chars[at] = c;
+  editorUpdateRow(row);
+}
+
+void editorInsertChar(int c) {
+  if(E.cy == E.numRows) {
+    editorAppendRow("", 0);
+  }
+  editorRowInsertChar(&E.row[E.cy], E.cx, c);
+  E.cx++;
+}
+
+/*
   * Open the file and write the content to
   * `E.row.chars`.
 */
@@ -427,7 +448,7 @@ void editorDrawRows(struct appendBuf* buf) {
     } else {
       int length = E.row[fileRow].rsize - E.colOff;
       if(length < 0) length = 0;
-      if (length > E.screenRows)
+      if (length > E.screenCols)
         length = E.screenCols;
       bufferAppend(buf, &E.row[fileRow].render[E.colOff], length);
     }
@@ -630,6 +651,10 @@ void editorProcessKeypress() {
     case ARROW_LEFT:
     case ARROW_RIGHT:
       editorMoveCursor(c);
+      break;
+
+    default:
+      editorInsertChar(c);
       break;
   }
 }
