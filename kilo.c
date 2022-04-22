@@ -36,6 +36,12 @@ typedef struct erow {
 struct editorConfig {
   int cx;
   int cy;
+  /*
+    * Keep track of what row of the file
+    * the user is currently scrolled to
+  */
+  int rowOff;
+  int colOff;
   int screenRows;
   int screenCols;
   int numRows;
@@ -312,12 +318,34 @@ void bufferFree(struct appendBuf* buf) {
 }
 
 /*
+  * Check if the cursor has moved outside of the
+  * visible window, and if so, adjust `E.rowOff`
+  * so that the cursor is just inside the visible
+  * window.
+*/
+void editorScroll() {
+  if(E.cy < E.rowOff) {
+    E.rowOff = E.cy;
+  }
+  if(E.cy >= E.rowOff + E.screenRows) {
+    E.rowOff = E.cy - E.screenRows + 1;
+  }
+  if(E.cx < E.colOff) {
+    E.colOff = E.cx;
+  }
+  if(E.cx >= E.colOff + E.screenCols) {
+    E.colOff = E.cx - E.screenCols + 1;
+  }
+}
+
+/*
   * Handle drawing each row of the buffer of text
   * being edited
 */
 void editorDrawRows(struct appendBuf* buf) {
   for(int y = 0; y < E.screenRows; ++y) {
-    if(y >= E.numRows) {
+    int fileRow = y + E.rowOff;
+    if(fileRow >= E.numRows) {
       if(E.numRows == 0 && y == E.screenRows / 3) {
         char welcome[80];
         int welcomeLength = snprintf(welcome, sizeof(welcome),
@@ -336,10 +364,11 @@ void editorDrawRows(struct appendBuf* buf) {
         bufferAppend(buf, "~", 1);
       }
     } else {
-      int length = E.row[y].size;
+      int length = E.row[fileRow].size - E.colOff;
+      if(length < 0) length = 0;
       if (length > E.screenRows)
         length = E.screenCols;
-      bufferAppend(buf, E.row[y].chars, length);
+      bufferAppend(buf, &E.row[fileRow].chars[E.colOff], length);
     }
 
     /*
@@ -364,6 +393,8 @@ void editorDrawRows(struct appendBuf* buf) {
   * To initialize the screen
 */
 void editorRefreshScreen() {
+  editorScroll();
+
   struct appendBuf buf = ABUF_INIT;
   /*
    * We use escape sequences to tell the terminal
@@ -386,6 +417,8 @@ void editorRefreshScreen() {
   editorDrawRows(&buf);
 
   char buffer[32];
+  snprintf(buffer, sizeof(buffer), "\x1b[%d;%dH",
+    (E.cy - E.rowOff) + 1, (E.cx -E.colOff) + 1);
   snprintf(buffer, sizeof(buffer), "\x1b[%d;%dH", E.cy + 1, E.cx + 1);
   bufferAppend(&buf, buffer, strlen(buffer));
 
@@ -403,15 +436,24 @@ void editorRefreshScreen() {
  * To process the w s a d
 */
 void editorMoveCursor(int key) {
+
+  erow* row = (E.cy >= E.numRows) ? NULL : &E.row[E.cy];
+
   switch (key) {
     case ARROW_LEFT:
       if(E.cx != 0) {
         E.cx--;
+      } else if(E.cy > 0) {
+        E.cy--;
+        E.cx = E.row[E.cy].size;
       }
       break;
     case ARROW_RIGHT:
-      if(E.cx != E.screenCols - 1) {
+      if(row && E.cx < row->size) {
         E.cx++;
+      } else if(row && E.cx == row->size) {
+        E.cy++;
+        E.cx = 0;
       }
       break;
     case ARROW_UP:
@@ -420,10 +462,16 @@ void editorMoveCursor(int key) {
       }
       break;
     case ARROW_DOWN:
-      if(E.cy != E.screenRows - 1) {
+      if(E.cy != E.numRows) {
         E.cy++;
       }
       break;
+  }
+
+  row = (E.cy >= E.numRows) ? NULL : &E.row[E.cy];
+  int rowLength = row ? row->size : 0;
+  if(E.cx > rowLength) {
+    E.cx = rowLength;
   }
 }
 
@@ -468,6 +516,8 @@ void editorProcessKeypress() {
 void initEditor() {
   E.cx = 0;
   E.cy = 0;
+  E.rowOff = 0;
+  E.colOff = 0;
   E.numRows = 0;
   E.row = NULL;
 
