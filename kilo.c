@@ -4,7 +4,7 @@
 
 void editorSetStatusMessage(const char* fmt, ...);
 void editorRefreshScreen();
-char* editorPrompt(char* prompt);
+char* editorPrompt(char* prompt, void(*callback)(char*, int));
 
 #include <ctype.h>
 #include <errno.h>
@@ -284,6 +284,19 @@ int editorRowCxToRx(erow *row, int cx) {
   return rx;
 }
 
+int editorRowRxToCx(erow* row, int rx) {
+  int currentRx = 0;
+  int cx;
+  for(cx = 0; cx < row->size; ++cx) {
+    if(row->chars[cx] == '\t')
+      currentRx += (KILO_TAB_STOP - 1) - (currentRx % KILO_TAB_STOP);
+    currentRx++;
+  }
+  if(currentRx > rx) return cx;
+  return cx;
+
+}
+
 /*
   * Copy the original string to render the string
 */
@@ -480,7 +493,7 @@ void editorOpen(char* filename) {
 
 void editorSave() {
   if(E.filename == NULL) {
-    E.filename = editorPrompt("Save as: %s (ESC to cancel)");
+    E.filename = editorPrompt("Save as: %s (ESC to cancel)", NULL);
     if(E.filename == NULL) {
       editorSetStatusMessage("Save aborted");
       return;
@@ -505,6 +518,59 @@ void editorSave() {
   }
   free(buf);
   editorSetStatusMessage("Can't save! I/O error: %s", strerror(errno));
+}
+
+void editorFindCallback(char* query, int key) {
+  static int lastMatch = -1;
+  static int direction = 1;
+
+  if(key == '\r' || key == '\x1b') {
+    lastMatch = -1;
+    direction = 1;
+    return;
+  } else if(key == ARROW_RIGHT || key == ARROW_DOWN) {
+    direction = 1;
+  } else if (key == ARROW_LEFT || key == ARROW_UP) {
+    direction = -1;
+  } else {
+    lastMatch = -1;
+    direction = 1;
+  }
+  if(lastMatch == -1) direction = 1;
+  int current = lastMatch;
+
+  for(int i = 0; i < E.numRows; ++i) {
+    current += direction;
+    if(current == -1) current = E.numRows - 1;
+    else if(current == E.numRows) current = 0;
+    erow* row = &E.row[current];
+    char* match = strstr(row->render, query);
+    if(match) {
+      lastMatch = current;
+      E.cy = current;
+      E.cx = editorRowRxToCx(row, match - row->render);
+      E.rowOff = E.numRows;
+      break;
+    }
+  }
+}
+
+void editorFind() {
+  int savedCx = E.cx;
+  int savedCy = E.cy;
+  int savedColOff = E.colOff;
+  int savedRowOff = E.rowOff;
+
+  char* query = editorPrompt("Search: %s (Use ESC/Arrows/Enter)", editorFindCallback);
+
+  if(query) {
+    free(query);
+  } else {
+    E.cx = savedCx;
+    E.cy = savedCy;
+    E.colOff = savedColOff;
+    E.rowOff = savedRowOff;
+  }
 }
 
 struct appendBuf {
@@ -709,7 +775,7 @@ void editorSetStatusMessage(const char* fmt, ...) {
 /*
  * Use prompt and return the value of the user input
 */
-char* editorPrompt(char* prompt) {
+char* editorPrompt(char* prompt, void(*callback)(char*, int)) {
   size_t bufSize = 128;
   char* buf = malloc(bufSize);
 
@@ -726,11 +792,13 @@ char* editorPrompt(char* prompt) {
         buf[--bufLength] = '\0';
     } else if(c == '\x1b') {
       editorSetStatusMessage("");
+      if(callback) callback(buf, c);
       free(buf);
       return NULL;
     } else if(c == '\r') {
       if(bufLength != 0) {
         editorSetStatusMessage("");
+        if(callback) callback(buf, c);
         return buf;
       }
     } else if(!iscntrl(c) && c < 128) {
@@ -741,6 +809,7 @@ char* editorPrompt(char* prompt) {
       buf[bufLength++] = c;
       buf[bufLength] = '\0';
     }
+    if(callback) callback(buf ,c);
   }
 }
 
@@ -824,6 +893,10 @@ void editorProcessKeypress() {
         E.cx = E.row[E.cy].size;
       break;
 
+    case CTRL_KEY('f'):
+      editorFind();
+      break;
+
     case BACKSPACE:
     case CTRL_KEY('h'):
     case DEL_KEY:
@@ -894,7 +967,8 @@ int main(int argc, char* argv[]) {
     editorOpen(argv[1]);
   }
 
-  editorSetStatusMessage("HELP: Ctrl-S = save | Ctrl-Q = quit");
+  editorSetStatusMessage(
+    "HELP: Ctrl-S = save | Ctrl-Q = quit | Ctrl-F = find");
 
   /*
     Now, the terminal starts in canonical mode, in this
